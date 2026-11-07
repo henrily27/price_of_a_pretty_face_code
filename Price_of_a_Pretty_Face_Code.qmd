@@ -1,0 +1,350 @@
+---
+title: "The Price of a Pretty Face: Does Attractiveness Pay When Controlling for Intelligence?"
+subtitle: "STAT 386 Data Acquisition Blog"
+author: "Henri Ly"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: true
+    code-summary: "Show code"
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+## Question and Audience
+
+**How do physical attractiveness, height, BMI (Body Mass Index), waist circumference, sex, and cognitive ability (iQ) impact an individual's annual salary when holding the other variables constant?**
+
+This analysis is intended for STAT386 students who want to learn more about data acquisition and the process of statistical analysis. I also find it personally interesting because it touches on questions of bias and how cognitive ability is rewarded.
+
+## Introduction
+
+**Source and Citation** The data is drawn from the Wisconsin Longitudinal Study (WLS) Version 2026_v1, accessible at <https://researchers.wls.wisc.edu/documentation/>. Herd, P., Carr, D., & Roan, C. (2014), *International Journal of Epidemiology*, 43, 34–41.
+
+**Observational Unit and Dimensions** The observational unit is an individual 1957 high school graduate from Wisconsin. The dataset is a 425 MB `.dta` file containing approximately 12,500 variables across over 10,000 longitudinal participant records. After filtering, the dataset contains 2990 observations of 7 variables: 6 predictors and 1 response variable. I added further variables to explore interaction between certain factors.
+
+**Variables and Evidence**
+
+-   **Response:** Annual *income* from wages, salaries, commissions, and tips (`r04_z_p001re_i`).
+
+-   **Predictors:** Physical height (`r06_z_x010rec_q`), perceived attractiveness (`r06_z_a103rea_i`), and cognitive ability/IQ (`ad_g_gwiiq_j`), sex = (`sd_z_sexrsp`), bmi = (`ad_g_srbmi`), waist = (`r06_z_x457re_i`).
+
+-   **Evidence:** The data supports the regression question because it tracks verified IQ test scores, physical measurements, and later-in-life income for the exact same individuals, allowing an OLS model to isolate variables and hold specific traits constant.
+
+**Permissions and Ethical Concerns**
+
+-   **Permissions:** As detailed when downloading the data, researchers must process it locally. Uploading raw WLS participant records to external AI platforms (like ChatGPT, Claude, Gemini, or other LLM's) is explicitly prohibited due to data retention and confidentiality risks.
+
+-   **Ethics and Representation:** Users must agree to make no attempts to de-anonymize participants. Additionally, the data represents a specific 1957 midwestern cohort, limiting modern demographic generalization, and evaluating attractiveness from static yearbook photos introduces subjective measurement bias.
+
+## Data Collection and Cleaning
+
+The WLS collected data longitudinally across multiple decades via participant surveys, administrative high school records (for Henmon-Nelson IQ scores), and independent panel evaluations of 1957 high school yearbook photographs to generate the physical attractiveness metric.
+
+After downloading the dataset, you can use code like this to get the dataframe which I used for this project. I pivoted the data, ran lookfor() functions to determine which columns were the ones I needed, and selected variables I found helpful for my question.
+
+```         
+my_data <- read_dta("/filepath")
+
+my_subset <- my_data |>
+  select(
+    height = r06_z_x010rec_q,
+    looks = r06_z_a103rea_i,
+    iq = ad_g_gwiiq_j,
+    income = r04_z_p001re_i,
+    sex = sd_z_sexrsp,
+    bmi = ad_g_srbmi,
+    waist = r06_z_x457re_i
+  ) |>
+  filter(
+    height >= 0,
+    looks >= 0,
+    iq >= 0,
+    income > 0,
+    waist > 0,
+    bmi > -4
+  ) |>
+  na.omit()
+  
+my_subset$sex <- my_subset$sex-1
+```
+
+I used functions like this can be used to determine which columns hold relevant variables.
+
+```         
+{library(labelled)}
+# Looks for column names or descriptors that contain the keyword
+lookfor(my_data, "keyword")
+
+# Sorts a column to determine whether outliers may exist
+test <- my_subset[order(my_subset$income, decreasing = FALSE), ]
+```
+
+```{r, echo=FALSE}
+library(haven)
+library(dplyr)
+
+my_data <- read_dta("~/Downloads/wls_main_public_2026_v1/wls_main_public_2026_v1.dta")
+
+my_subset <- my_data |>
+  select(
+    height = r06_z_x010rec_q,
+    looks = r06_z_a103rea_i,
+    iq = ad_g_gwiiq_j,
+    income = r04_z_p001re_i,
+    sex = sd_z_sexrsp,
+    bmi = ad_g_srbmi,
+    waist = r06_z_x457re_i
+  ) |>
+  filter(
+    height >= 0,
+    looks >= 0,
+    iq >= 0,
+    income > 1000,
+    waist > 0,
+    bmi > -4
+  ) |>
+  na.omit()
+
+my_subset$sex <- my_subset$sex-1
+my_subset$looks <- as.numeric(my_subset$looks)
+```
+
+## One useful first look
+
+```{r}
+library(ggplot2)
+library(tidyr)
+
+my_subset |>
+  pivot_longer(
+    cols = c(height, looks, iq, bmi, waist, sex),
+    names_to = "predictor",
+    values_to = "value"
+  ) |>
+  ggplot(aes(x = value, y = income)) +
+  geom_point(alpha = 0.65) +
+  facet_wrap(~ predictor, scales = "free_x") +
+  labs(
+    x = NULL,
+    y = "income",
+    title = "Income compared with each predictor"
+  )
+
+cor_long <- as.data.frame(as.table(cor(my_subset))) |>
+  as_tibble() |>
+  rename(
+    var_1 = Var1, 
+    var_2 = Var2, 
+    correlation = Freq
+  )
+
+ggplot(cor_long, aes(x = var_1, y = var_2, fill = correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(correlation, 2))) +
+  scale_fill_gradient2(midpoint = 0, limits = c(-1, 1)) +
+  coord_equal()
+```
+
+## Baseline model
+
+```{r}
+# Fit the baseline and display only the output needed below. 
+model_fit <- lm(log(income) ~ height + looks + iq + bmi + waist + sex, data = my_subset)  
+summary(model_fit)
+```
+
+One limitation to this is that perceived attractiveness is based on surveys and thus is mostly subjective in contrast to the other variables which are all objectively measured.
+
+```{r}
+#| fig-height: 8
+#| fig-width: 8
+library(gglm)
+# 1. Set global graphical parameters for the grid
+par(mfrow = c(2, 2))
+
+# 2. Plot the model with a custom panel function for the smooth lines
+plot(model_fit, 
+     pch = 16,                                      
+     col = adjustcolor("dodgerblue4", alpha.f = 0.4),
+     lwd = 2,                                       
+     cex.id = 0.8,                                  
+     cex.main = 1.1,
+     # Override the default panel to safely pass col.smooth
+     panel = function(x, y, ...) panel.smooth(x, y, col.smooth = "darkorange", ...)) 
+
+# 3. Add an overall title to the entire 2x2 grid
+mtext("Diagnostic Plots for Income Model", side = 3, outer = TRUE, line = 0, font = 2, cex = 1.3)
+
+# 4. Reset the plot window back to default when finished
+par(mfrow = c(1, 1), las = 0, bty = "o", mar = c(5, 4, 4, 2) + 0.1, oma = c(0, 0, 0, 0))
+```
+
+```{r}
+library(car)
+vif_values <- vif(model_fit)
+
+# Convert the results into a dataframe for ggplot
+vif_df <- data.frame(
+  Variable = names(vif_values),
+  VIF = vif_values
+)
+
+# Create the multicollinearity plot
+ggplot(vif_df, aes(x = reorder(Variable, VIF), y = VIF)) +
+  geom_bar(stat = "identity", fill = "dodgerblue4", alpha = 0.8, width = 0.6) +
+  # Add a threshold line at 5 (dark orange for high contrast)
+  geom_hline(yintercept = 5, color = "darkorange", linetype = "dashed", linewidth = 1.2) +
+  coord_flip() + # Flip axes to make variable names easy to read
+  theme_minimal() +
+  labs(
+    title = "Multicollinearity Check (Variance Inflation Factor)",
+    subtitle = "Values approaching or crossing the orange line (VIF = 5) indicate problematic overlap",
+    x = "Predictor Variable",
+    y = "VIF Score"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+```
+
+```{r}
+my_subset$sex_factor <- as.factor(my_subset$sex)
+
+# Plot Income vs IQ, split by Sex
+ggplot(my_subset, aes(x = iq, y = income, color = sex_factor)) +
+  geom_point(alpha = 0.3) + # Lighter alpha because there are many points
+  # Add separate trend lines for each sex
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  # Manually assign the previous basic R colors
+  scale_color_manual(
+    values = c("dodgerblue4", "darkorange"), 
+    name = "Sex",
+    labels = c("Male", "Female") # Adjust these labels based on WLS coding
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Interaction Check: Does the IQ Premium differ by Sex?",
+    x = "IQ Score (Standardized)",
+    y = "Annual Income"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+```{r}
+library(patchwork)
+# 1. Plot Income vs Waist, split by Sex
+p_waist <- ggplot(my_subset, aes(x = waist, y = income, color = sex_factor)) +
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  scale_color_manual(
+    values = c("dodgerblue4", "darkorange"), 
+    name = "Sex",
+    labels = c("Male", "Female") 
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Income by Waist Circumference",
+    x = "Waist Size",
+    y = "Annual Income (USD)"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+p_bmi <- ggplot(my_subset, aes(x = bmi, y = income, color = sex_factor)) +
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  scale_color_manual(
+    values = c("dodgerblue4", "darkorange"), 
+    name = "Sex",
+    labels = c("Male", "Female") 
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Income by BMI",
+    x = "Body Mass Index (BMI)",
+    y = "Annual Income (USD)"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    axis.title = element_text(face = "bold")
+  )
+
+# 3. Combine them side-by-side using patchwork
+(p_waist + p_bmi) +
+  # Collect the duplicate legends into a single legend at the bottom
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom") &
+  # Add an overarching master title
+  plot_annotation(
+    title = "Interaction Checks: Do Physical Premiums/Penalties Differ by Sex?",
+    theme = theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5))
+  )
+```
+
+```{r}
+my_subset <- my_subset |>
+  mutate(
+    waist_group = cut(
+      waist, 
+      breaks = quantile(waist, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE), 
+      labels = c("Small", "Medium", "Large"), 
+      include.lowest = TRUE
+    )
+  )
+
+# 2. Plot Income vs BMI, split by the new Waist groups
+ggplot(my_subset, aes(x = bmi, y = income, color = waist_group)) +
+  geom_point(alpha = 0.3) + 
+  # Add separate trend lines for each waist group
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  # Use three distinct, basic R colors
+  scale_color_manual(
+    values = c("dodgerblue4", "forestgreen", "darkorange"), 
+    name = "Waist Size"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Interaction Check: Does the BMI Effect Depend on Waist Size?",
+    x = "Body Mass Index (BMI)",
+    y = "Annual Income (USD)"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+## Interaction between sex and IQ
+
+```{r}
+model2 <- lm(log(income) ~ height + looks + bmi + waist + sex + iq + iq*sex, data = my_subset)  
+summary(model2)
+```
+
+```{r}
+#| fig-height: 8
+#| fig-width: 8
+par(mfrow = c(2, 2))
+plot(model2, 
+     pch = 16,                                      
+     col = adjustcolor("dodgerblue4", alpha.f = 0.4),
+     lwd = 2,                                       
+     cex.id = 0.8,                                  
+     cex.main = 1.1,
+     # Override the default panel to safely pass col.smooth
+     panel = function(x, y, ...) panel.smooth(x, y, col.smooth = "darkorange", ...)) 
+mtext("Diagnostic Plots for Income Model", side = 3, outer = TRUE, line = 0, font = 2, cex = 1.3)
+par(mfrow = c(1, 1), las = 0, bty = "o", mar = c(5, 4, 4, 2) + 0.1, oma = c(0, 0, 0, 0))
+```
